@@ -16,7 +16,9 @@ _start:
     bl uart_init
     ldr r0, =hello
     bl uart_puts
+    bl loop
 
+    
 @ === UART Functions ===
 
 /* -------------------------------------------------
@@ -28,9 +30,12 @@ uart_init:
     mov r0, #0
     str r0, [r1, #UART0_CR]           @ disable UART
 
-    mov r0, #13
+   // mov r0, #(1 << 4)                 @ Clear FIFOs (bit 4: FEN = FIFO Enable)
+   // str r0, [r1, #UART0_LCRH]         @ Write to line control register
+
+    mov r0, #4
     str r0, [r1, #UART0_IBRD]         @ integer divisor
-    mov r0, #2
+    mov r0, #0
     str r0, [r1, #UART0_FBRD]         @ fractional divisor
 
     mov r0, #(3 << 5)                 @ 8-bit, no parity, 1 stop
@@ -45,15 +50,17 @@ uart_init:
    Send one char in r0
    ------------------------------------------------- */
 uart_send:
-    push {r1}
+    push {r0, r1}            @ Save r0 (string pointer) and r1 on the stack
 1:
     ldr r1, =UART0_BASE
     ldr r2, [r1, #UART0_FR]
     tst r2, #(1 << 5)             @ TXFF bit (Transmit FIFO Full)
     bne 1b
     strb r0, [r1, #UART0_DR]
-    pop {r1}
-    bx lr
+    
+    pop {r0, r1}             @ Restore r0 (string pointer) and r1 from the stack
+    bx lr                    @ Return
+
 
 /* -------------------------------------------------
    Receive one char → r0
@@ -71,17 +78,19 @@ uart_recv:
    Print null-terminated string (r0 = ptr)
    ------------------------------------------------- */
 uart_puts:
-    push {r1}    //push {r0, r1}
+    ldr r1, =UART0_BASE          @ Load UART base address
 1:
-    ldrb r1, [r0], #1
-    cmp r1, #0
-    beq 2f
-    mov r0, r1
-    bl uart_send
-    b 1b
+    ldrb r2, [r0], #1            @ Load the next byte from the string (post-increment r0)
+    cmp r2, #0                   @ Check for null terminator
+    beq 2f                       @ Exit if null terminator
+3:  ldr r3, [r1, #UART0_FR]      @ Load UART flag register
+    tst r3, #(1 << 5)            @ Check TXFF (Transmit FIFO Full) flag
+    bne 3b                       @ Wait until FIFO is not full
+    strb r2, [r1, #UART0_DR]     @ Write character to UART data register
+    b 1b                         @ Repeat for the next character
 2:
-    pop {r1} //pop {r0, r1}
-    bx lr
+    bx lr                        @ Return
+
 /* -------------------------------------------------
    Entry point
    ------------------------------------------------- */
@@ -97,3 +106,4 @@ loop:
 
 hello:
     .asciz "Simple ARM Monitor\r\n"
+    //.byte 0
